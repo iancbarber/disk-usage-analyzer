@@ -1,0 +1,8 @@
+# Build artifacts
+dua
+*.o
+*.dSYM/
+
+# Editor / OS cruft
+.DS_Store
+*.swp
