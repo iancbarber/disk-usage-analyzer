@@ -31,3 +31,12 @@ that recurrence in one English sentence before writing each function.
 - 2026-06-03 — Repo scoped, scaffold created (README, Makefile, stub `main.c`,
   .gitignore). Decision: build in C (compounds into CMU 15-213), port to Zig as
   a later project. Next: implement v0.1 (open a dir, list entries + sizes).
+- 2026-06-09 — **v0.1 implemented (6-day stall broken).** `opendir`/`readdir`/
+  `closedir` loop printing each entry name one level; skips `.`/`..` via a
+  `continue` guard; `perror("opendir")` on failure. Sizes deferred to v0.2.
+  Learned this session: (1) a failing syscall should report *why* (`perror` +
+  `errno`); (2) `const DIR *` is wrong — `readdir` mutates the handle, so the
+  compiler warns about discarding the qualifier; `const` is for read-only data
+  like `const char *path`; (3) comments should state what's LEFT, not narrate
+  what the code already does. **Next: v0.2** — build full path `"path/name"`
+  (watch buffer size), `lstat` it, print `st_size` next to the name.
