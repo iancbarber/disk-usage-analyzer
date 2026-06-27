@@ -6,13 +6,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <dirent.h>   
+#include <sys/stat.h>
 
 
 int main(int argc, char *argv[])
 {
 
 /* TODO:
- *   - lstat() each full path; print st_size
  *   - recurse into subdirectories: total(dir) = sum(file sizes) + sum(total(subdir))
  */   
 
@@ -28,7 +28,13 @@ int main(int argc, char *argv[])
             continue; 
         char buf[4096];
         snprintf(buf, sizeof(buf), "%s/%s", path, dp->d_name);
-        printf("%s\n", buf);
+        struct stat st;
+        if (lstat(buf, &st) == -1) {
+            perror(buf);
+            continue;    
+        }
+        printf("%lld\t%s\n", (long long)st.st_size, buf);
+
     }
 
     closedir(dirp);
