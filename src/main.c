@@ -5,6 +5,7 @@
 #define _DEFAULT_SOURCE   /* expose POSIX funcs (lstat) under strict -std=c11 */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <math.h>
@@ -67,6 +68,14 @@ int main(int argc, char *argv[])
     printf("%s\n", buf);
     format_size(buf, 16, 10207);
     printf("%s\n", buf);
+    /* append_entry tests */
+    Entry e1 = {.path="~/test/", .apparent_size=234, .disk_usage=210};
+    EntryList el = {.items=NULL, .count=0, .capacity=0};  
+    append_entry(&el, e1);
+    printf("Path: %s, apparent size: %lld, disk usage: %lld\n", el.items[0].path, el.items[0].apparent_size, el.items[0].disk_usage);
+    Entry e2 = {.path="/~test2/", .apparent_size=6178290, .disk_usage=41328902};
+    append_entry(&el, e2);
+    printf("Path: %s, apparent size: %lld, disk usage: %lld\n", el.items[1].path, el.items[1].apparent_size, el.items[1].disk_usage);
     return 0;
 }
 
@@ -140,3 +149,20 @@ void format_size(char *buf, size_t buflen, long long bytes)
     }
 }
 
+void append_entry(EntryList *list, Entry e)
+{
+    size_t new_size;
+    if (list->count == list->capacity) {
+        new_size = list->count == 0 ?  16 : list->capacity * 2;
+        Entry *tmp; 
+        tmp = realloc(list->items, new_size * sizeof *list->items);
+        if (tmp == NULL) {
+            perror("realloc");
+            return;
+        } 
+        list->items = tmp;
+        list->capacity = new_size;
+    }
+    list->items[list->count] = e;
+    list->count++;
+}
