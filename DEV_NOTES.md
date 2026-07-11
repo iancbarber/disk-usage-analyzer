@@ -82,3 +82,44 @@ that recurrence in one English sentence before writing each function.
   that doesn't actually check for warnings is itself a literal-audit failure.
   **Next: v0.3** — rank largest-first + human-readable sizes (`qsort`, dynamic
   arrays, KB/MB/GB formatting).
+- 2026-07-05 → 07-08 — **v0.3 designed + first two bodies shipped.** Design
+  locked HtDP-in-C style (Entry / EntryList / Sizes + seven signatures).
+  `format_size` shipped + committed solo (53df419); `append_entry` shipped +
+  committed solo ("Add append_entry: resize items if needed and add new entry")
+  after self-finding the realloc units bug by reading (new_size counts ENTRIES,
+  realloc takes BYTES → `new_size * sizeof *list->items`) and closing the ASAN
+  loop (compile bakes tripwires in, the report fires at RUNTIME; a test you've
+  never seen fail is decorative). Bonus lesson: `make` has no memory of flags →
+  `make clean && make` after any ASAN session.
+- 2026-07-09/10 — **v0.3 nearly complete: `subtree_sizes` + `collect_entries` +
+  `print_entries` + `free_entries` all written; main wired collect → print → free.**
+  subtree_sizes = dir_total upgraded to two totals in one walk (single recursive
+  call via a tmp Sizes — the doubled-walk trap pre-caught). collect_entries
+  written next morning solo in <30 min after an evening design session (cut
+  short by a laptop close). Learned: (1) **strdup ownership** — readdir reuses
+  its buffer AND the local path buf is stack-scoped, so N entries need N heap
+  copies; every strdup's free already has a home (`free_entries`: paths first,
+  then items); (2) **the two-layer split** — subtree_sizes is the recursive
+  *accountant* (bare totals, knows nothing of Entry), collect_entries the flat
+  *report-builder* (one row per immediate child, no recursion of its own);
+  the dependency arrow is one-way, collector → aggregator; (3) the one-sentence
+  purpose statement forces the scope decision (immediate children only) before
+  the body can drift. Verified (Claude, Linux container): `-Wall -Wextra` clean;
+  ASAN + LeakSanitizer silent including error paths; sparse file reads
+  0B disk / 100M apparent (receipt ≪ ruler). **Next: comparator (ask before
+  writing it) + `sort_entries`, then my own verification pass vs `du` — one
+  known discrepancy is waiting there for me to find and explain — then the
+  written paragraph, ship, commit.**
+- 2026-07-11 **v0.3 - sorted, human-readable, directories count**
+  dua now reports each immediate child's disk usage (st_blocks * 512, summed over the subtree) alongside its exact apparent size,
+  formatted human-readable (B/K/M/G/T) and sorted largest-first with an alphabetical tie-break.  The biggest lesson was qsort's void*
+  interface: the comparator receives anonymous bytes that must be re-typed through a typed local, the call site is just as unchecked
+  (I passed the EntryList struct itself instead of its items array and the compiler couldn't object), and the comparator must compute its
+  sign by comparison, never subtraction - a long long difference truncated to int makes a 3 GB file sort below an empty one.  Directories'
+  own sizes now count in both columns: on some filesystems a directory's entry table allocates real blocks (ext4 charges >=4K, APFS charges 
+  0), and a subtree total should equal what deleting the subtree would free.  Hardlinked files are still counted once per name; v0.5 will 
+  dedup by (st_dev, st_ino) so each inode counts once, the way du does.  Verification taught me that agreement is not correctness - an
+  earlier double-counting bug actually moved dua closer to du's numbers - so I triangulated with a third source (ls/stat) rather than 
+  trusting one comparison, and found the reference tools themselves disagree: GNU du counts directory apparent size as 0, BSD du -A includes
+  it, and BSD quantizes every apparent size up to 512-byte blocks where dua reports exact bytes.  Known edges: size just under a unit
+  boundary print as 1024K rather than 1.0M, and failed allocations drop that entry with a warning.

@@ -11,7 +11,6 @@
 #include <math.h>
 #include <sys/stat.h>
 
-long long dir_total(const char *path);
 typedef struct { 
     char *path; 
     long long apparent_size; 
@@ -41,6 +40,9 @@ EntryList collect_entries(const char *path);
 // qsort largest-first by disk_usage
 void sort_entries(EntryList *list);
 
+// compare func for qsort to sort entries from max to min disk_usage size
+int compare_disk_desc(const void *e1, const void *e2);
+
 // write "2.3 GB" into buf
 void format_size(char *buf, size_t buflen, long long bytes);
 
@@ -49,45 +51,30 @@ void free_entries(EntryList *list);  // every path first, then items
 int main(int argc, char *argv[])
 {
     const char *path = (argc > 1) ? argv[1] : ".";
-    dir_total(path);
-    /* format_size temp tests */
-    char buf[16];
-    format_size(buf, 16, 0);
-    printf("%s\n", buf);
-    format_size(buf, 16, 1023);
-    printf("%s\n", buf);
-    format_size(buf, 16, 1024);
-    printf("%s\n", buf);
-    format_size(buf, 16, 1048575);
-    printf("%s\n", buf);
-    format_size(buf, 16, 1048576);
-    printf("%s\n", buf);
-    format_size(buf, 16, 1536);
-    printf("%s\n", buf);
-    format_size(buf, 16, (long long)1024*1024*1024*1024);
-    printf("%s\n", buf);
-    format_size(buf, 16, 10207);
-    printf("%s\n", buf);
-    /* append_entry tests */
-    Entry e1 = {.path="~/test/", .apparent_size=234, .disk_usage=210};
-    EntryList el = {.items=NULL, .count=0, .capacity=0};  
-    append_entry(&el, e1);
-    printf("Path: %s, apparent size: %lld, disk usage: %lld\n", el.items[0].path, el.items[0].apparent_size, el.items[0].disk_usage);
-    Entry e2 = {.path="/~test2/", .apparent_size=6178290, .disk_usage=41328902};
-    append_entry(&el, e2);
-    printf("Path: %s, apparent size: %lld, disk usage: %lld\n", el.items[1].path, el.items[1].apparent_size, el.items[1].disk_usage);
+    EntryList list = collect_entries(path);
+    sort_entries(&list);
+    print_entries(&list);
+    free_entries(&list);
     return 0;
 }
 
-long long dir_total(const char *path)
+Sizes subtree_sizes(const char *path)
 {
     DIR *dirp = opendir(path);
     if (dirp == NULL) {
-        perror("opendir");
-        return 0;
+        perror(path);
+        return (Sizes){0,0};
+    }
+    struct stat st_dir;
+    Sizes cur_dir_size = {0, 0};
+    if (lstat(path, &st_dir) == -1) {
+        perror(path);
+    } else {
+        cur_dir_size.apparent = st_dir.st_size;
+        cur_dir_size.disk = (long long)st_dir.st_blocks * 512;
     }
     struct dirent *dp;
-    long long cur_size = 0;
+    Sizes sizes = {.apparent=0, .disk=0}; 
     while ((dp = readdir(dirp)) != NULL) {
         if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0) {
             continue;
@@ -100,16 +87,19 @@ long long dir_total(const char *path)
             continue;
         }
         if (S_ISDIR(st.st_mode)) {
-            cur_size += dir_total(buf);
+            Sizes tmp = subtree_sizes(buf);
+            sizes.apparent += tmp.apparent; 
+            sizes.disk += tmp.disk; 
         } else {
-            cur_size += (long long)st.st_size;
+            sizes.apparent += (long long)st.st_size;
+            sizes.disk += (long long)st.st_blocks * 512;
         }
     }
-    printf("%lld\t%s\n", cur_size, path);
     closedir(dirp);
-    return cur_size;
+    sizes.apparent += cur_dir_size.apparent;
+    sizes.disk += cur_dir_size.disk;
+    return sizes;
 }
-
 
 void format_size(char *buf, size_t buflen, long long bytes) 
 {
@@ -165,4 +155,84 @@ void append_entry(EntryList *list, Entry e)
     }
     list->items[list->count] = e;
     list->count++;
+}
+
+// collects the immediate children of path into an EntryList, with each directory child's sizes computed for its whole subtree.
+EntryList collect_entries(const char *path)
+{
+    EntryList el = {.items=NULL, .count=0, .capacity=0};  
+    
+    DIR *dirp = opendir(path);
+    if (dirp == NULL) {
+        perror(path);
+        return el;
+    }
+    struct dirent *dp;
+    while ((dp = readdir(dirp)) != NULL) {
+        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0) {
+            continue;
+        }
+        char buf[4096];
+        snprintf(buf, sizeof(buf), "%s/%s", path, dp->d_name);
+
+        struct stat st;
+        if (lstat(buf, &st) == -1) {
+            perror(buf);
+            continue;
+        }
+        Entry e;
+        Sizes tmp;
+        if (S_ISDIR(st.st_mode)) {
+            tmp = subtree_sizes(buf);
+        } else {
+            tmp.apparent = (long long)st.st_size;
+            tmp.disk = (long long)st.st_blocks * 512;
+        }
+        if ((e.path = strdup(buf)) == NULL) {
+            perror("strdup");
+            continue;
+        }
+        e.apparent_size = tmp.apparent; 
+        e.disk_usage = tmp.disk;
+        append_entry(&el, e);
+    }
+    closedir(dirp);
+    return el;
+}
+
+void print_entries(const EntryList *list)
+{
+    for (size_t i = 0; i < list->count; i++) {
+        char apparent_buf[16];
+        char disk_buf[16];
+        format_size(apparent_buf, sizeof apparent_buf, list->items[i].apparent_size);
+        format_size(disk_buf, sizeof disk_buf, list->items[i].disk_usage);
+        printf("%s\t(%s apparent)\t%s\n", disk_buf, apparent_buf, list->items[i].path);
+    }
+}
+
+// every path first, then items
+void free_entries(EntryList *list)
+{
+    for (size_t i = 0; i < list->count; i++) {
+        free(list->items[i].path);
+    }
+    free(list->items);
+}
+
+
+int compare_disk_desc(const void *e1, const void *e2) {
+    const Entry *a = e1;
+    const Entry *b = e2;
+    
+    if (a->disk_usage == b->disk_usage) {
+        return strcmp(a->path, b->path);
+    }
+    return a->disk_usage > b->disk_usage ? -1 : 1; 
+                  
+}
+
+
+void sort_entries(EntryList *list) {
+    qsort(list->items, list->count, sizeof(Entry), &compare_disk_desc);
 }
