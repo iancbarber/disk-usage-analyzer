@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <math.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 typedef struct { 
     char *path; 
@@ -38,10 +39,12 @@ void append_entry(EntryList *list, Entry e);
 EntryList collect_entries(const char *path);
 
 // qsort largest-first by disk_usage
-void sort_entries(EntryList *list);
-
+void sort_entries(EntryList *list, int (*compare_func)(const void *, const void *));
 // compare func for qsort to sort entries from max to min disk_usage size
 int compare_disk_desc(const void *e1, const void *e2);
+
+// compare func for qsort to sort entries from max to min apparent_size size
+int compare_apparent_desc(const void *e1, const void *e2); 
 
 // write "2.3 GB" into buf
 void format_size(char *buf, size_t buflen, long long bytes);
@@ -50,9 +53,24 @@ void print_entries(const EntryList *list);
 void free_entries(EntryList *list);  // every path first, then items
 int main(int argc, char *argv[])
 {
-    const char *path = (argc > 1) ? argv[1] : ".";
+    int ch;
+    int apparent = 0;
+    while ((ch = getopt(argc, argv, "a")) != -1) {
+        switch (ch) {
+        case 'a':
+            apparent = 1;
+            break;
+        default:
+            fprintf(stderr, "Usage: ./dua DIR or ./dua -a DIR to sort by apparent size.\n");
+            exit(1);
+            break;
+        }
+    } 
+    argc -= optind; 
+    argv += optind;
+    const char *path = (argc > 0) ? argv[0] : ".";
     EntryList list = collect_entries(path);
-    sort_entries(&list);
+    sort_entries(&list, apparent ? compare_apparent_desc : compare_disk_desc);
     print_entries(&list);
     free_entries(&list);
     return 0;
@@ -229,10 +247,18 @@ int compare_disk_desc(const void *e1, const void *e2) {
         return strcmp(a->path, b->path);
     }
     return a->disk_usage > b->disk_usage ? -1 : 1; 
-                  
 }
 
+int compare_apparent_desc(const void *e1, const void *e2) {
+    const Entry *a = e1;
+    const Entry *b = e2;
+    
+    if (a->apparent_size == b->apparent_size) {
+        return strcmp(a->path, b->path);
+    }
+    return a->apparent_size > b->apparent_size ? -1 : 1; 
+}
 
-void sort_entries(EntryList *list) {
-    qsort(list->items, list->count, sizeof(Entry), &compare_disk_desc);
+void sort_entries(EntryList *list, int (*compare_func)(const void *, const void *)) {
+    qsort(list->items, list->count, sizeof(Entry), compare_func);
 }
